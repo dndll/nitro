@@ -191,6 +191,7 @@ func RecoverPayloadFromDasBatch(
 		dastree.RecordHash(recordPreimage, keysetPreimage)
 	}
 
+	log.Info("Checking keyset %s", keysetPreimage)
 	keyset, err := DeserializeKeyset(bytes.NewReader(keysetPreimage), keysetValidationMode == KeysetDontValidate)
 	if err != nil {
 		logLevel := log.Error

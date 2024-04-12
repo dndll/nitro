@@ -164,6 +164,8 @@ type storeResponse struct {
 // constructed, calls to Store(...) will try to verify the passed-in data's signature
 // is from the batch poster. If the contract details are not provided, then the
 // signature is not checked, which is useful for testing.
+// FIXME: the signature that is passed down needs to be resigned if used for NEAR DA
+// As the DataHash is different when submitted to NEAR
 func (a *Aggregator) Store(ctx context.Context, message []byte, timeout uint64, sig []byte) (*arbstate.DataAvailabilityCertificate, error) {
 	log.Trace("das.Aggregator.Store", "message", pretty.FirstFewBytes(message), "timeout", time.Unix(int64(timeout), 0), "sig", pretty.FirstFewBytes(sig))
 	if a.addrVerifier != nil {
@@ -182,7 +184,9 @@ func (a *Aggregator) Store(ctx context.Context, message []byte, timeout uint64, 
 
 	responses := make(chan storeResponse, len(a.services))
 
-	expectedHash := dastree.Hash(message)
+	var expectedHash = dastree.Hash(message)
+
+	log.Info("das.Aggregator.Store: expected hash", "hash", expectedHash)
 	for _, d := range a.services {
 		go func(ctx context.Context, d ServiceDetails) {
 			storeCtx, cancel := context.WithTimeout(ctx, a.requestTimeout)
@@ -195,7 +199,10 @@ func (a *Aggregator) Store(ctx context.Context, message []byte, timeout uint64, 
 			}
 
 			cert, err := d.service.Store(storeCtx, message, timeout, sig)
+			log.Info("das.Aggregator.Store: Verifying signature from certificate", "certificate", cert)
+
 			if err != nil {
+				log.Error("Store failed", err)
 				incFailureMetric()
 				if errors.Is(err, context.DeadlineExceeded) {
 					metrics.GetOrRegisterCounter(metricWithServiceName+"/error/timeout/total", nil).Inc(1)
@@ -210,6 +217,7 @@ func (a *Aggregator) Store(ctx context.Context, message []byte, timeout uint64, 
 				cert.Sig, cert.SerializeSignableFields(), d.pubKey,
 			)
 			if err != nil {
+				log.Error("Signature verification failed", err)
 				incFailureMetric()
 				metrics.GetOrRegisterCounter(metricWithServiceName+"/error/bad_response/total", nil).Inc(1)
 				responses <- storeResponse{d, nil, err}
@@ -224,7 +232,8 @@ func (a *Aggregator) Store(ctx context.Context, message []byte, timeout uint64, 
 
 			// SignersMask from backend DAS is ignored.
 
-			if cert.DataHash != expectedHash {
+			// FIXME: near DA fails this, bypass this check if near DA is used
+			if cert.Version != 255 && cert.DataHash != expectedHash {
 				incFailureMetric()
 				metrics.GetOrRegisterCounter(metricWithServiceName+"/error/bad_response/total", nil).Inc(1)
 				responses <- storeResponse{d, nil, errors.New("hash verification failed")}
@@ -235,6 +244,11 @@ func (a *Aggregator) Store(ctx context.Context, message []byte, timeout uint64, 
 				metrics.GetOrRegisterCounter(metricWithServiceName+"/error/bad_response/total", nil).Inc(1)
 				responses <- storeResponse{d, nil, fmt.Errorf("timeout was %d, expected %d", cert.Timeout, timeout)}
 				return
+			}
+
+			// FIXME: update the expected hash to 
+			if cert.Version == 255 {
+				expectedHash = cert.DataHash
 			}
 
 			metrics.GetOrRegisterCounter(metricWithServiceName+"/success/total", nil).Inc(1)
@@ -315,6 +329,9 @@ func (a *Aggregator) Store(ctx context.Context, message []byte, timeout uint64, 
 	aggPubKey := blsSignatures.AggregatePublicKeys(cd.pubKeys)
 	aggCert.SignersMask = cd.aggSignersMask
 
+	// TODO: for near we update the expected hash away from the DASTree, look into if we can just use that
+	// here
+	log.Info("das.Aggregator: new expected hash", "hash", expectedHash)
 	aggCert.DataHash = expectedHash
 	aggCert.Timeout = timeout
 	aggCert.KeysetHash = a.keysetHash

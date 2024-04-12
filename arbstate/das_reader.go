@@ -13,6 +13,7 @@ import (
 	"io"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/log"
 
 	"github.com/offchainlabs/nitro/arbos/util"
 	"github.com/offchainlabs/nitro/blsSignatures"
@@ -153,6 +154,7 @@ func (c *DataAvailabilityCertificate) RecoverKeyset(
 	if !dastree.ValidHash(c.KeysetHash, keysetBytes) {
 		return nil, errors.New("keyset hash does not match cert")
 	}
+	log.Info("Recovering keyset", "keysetHash", c.KeysetHash)
 	return DeserializeKeyset(bytes.NewReader(keysetBytes), assumeKeysetValid)
 }
 
@@ -212,6 +214,7 @@ func DeserializeKeyset(rd io.Reader, assumeKeysetValid bool) (*DataAvailabilityK
 		if _, err := io.ReadFull(rd, buf); err != nil {
 			return nil, err
 		}
+		log.Info("Deserializing public key", "i", i, "numKeys", numKeys)
 		pubkeys[i], err = blsSignatures.PublicKeyFromBytes(buf, assumeKeysetValid)
 		if err != nil {
 			return nil, err

@@ -124,6 +124,11 @@ RUN NITRO_BUILD_IGNORE_TIMESTAMPS=1 make build-prover-lib
 RUN NITRO_BUILD_IGNORE_TIMESTAMPS=1 make build-prover-bin
 RUN NITRO_BUILD_IGNORE_TIMESTAMPS=1 make CARGOFLAGS="--features=llvm" build-jit
 
+# TODO: could clone RDA and just build da-rpc
+
+COPY rollup-data-availability /rollup-data-availability 
+RUN cd /rollup-data-availability/crates/da-rpc-sys && make da-rpc-sys
+
 FROM scratch as prover-export
 COPY --from=prover-builder /workspace/target/ /
 
@@ -165,7 +170,9 @@ RUN ./download-machine.sh consensus-v10.1 0xda4e3ad5e7feacb817c21c8d0220da7650fe
 RUN ./download-machine.sh consensus-v10.2 0x0754e09320c381566cc0449904c377a52bd34a6b9404432e80afd573b67f7b17
 RUN ./download-machine.sh consensus-v10.3 0xf559b6d4fa869472dabce70fe1c15221bdda837533dfd891916836975b434dec
 
-FROM golang:1.20-bullseye as node-builder
+FROM ghcr.io/near/rollup-data-availability/da-rpc:latest as da-rpc 
+
+FROM golang:1.20-bookworm as node-builder
 WORKDIR /workspace
 ARG version=""
 ARG datetime=""
@@ -189,19 +196,22 @@ COPY --from=brotli-library-export / target/
 COPY --from=prover-export / target/
 RUN mkdir -p target/bin
 COPY .nitro-tag.txt /nitro-tag.txt
+
+COPY --from=prover-builder /workspace/gopkg/da-rpc/lib/ /usr/local/lib
+
 RUN NITRO_BUILD_IGNORE_TIMESTAMPS=1 make build
 
 FROM node-builder as fuzz-builder
 RUN mkdir fuzzers/
 RUN ./scripts/fuzz.bash --build --binary-path /workspace/fuzzers/
 
-FROM debian:bullseye-slim as nitro-fuzzer
+FROM debian:bookworm-slim as nitro-fuzzer
 COPY --from=fuzz-builder /workspace/fuzzers/*.fuzz /usr/local/bin/
 COPY ./scripts/fuzz.bash /usr/local/bin
 RUN mkdir /fuzzcache
 ENTRYPOINT [ "/usr/local/bin/fuzz.bash", "--binary-path", "/usr/local/bin/", "--fuzzcache-path", "/fuzzcache" ]
 
-FROM debian:bullseye-slim as nitro-node-slim
+FROM debian:bookworm-slim as nitro-node-slim
 WORKDIR /home/user
 COPY --from=node-builder /workspace/target/bin/nitro /usr/local/bin/
 COPY --from=node-builder /workspace/target/bin/relay /usr/local/bin/
@@ -246,6 +256,9 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
 USER user
 
 FROM nitro-node as nitro-node-dev
+
+COPY --from=da-rpc /gopkg/da-rpc/lib/ /usr/local/lib
+
 USER root
 # Copy in latest WASM module root
 RUN rm -f /home/user/target/machines/latest

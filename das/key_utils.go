@@ -11,6 +11,7 @@ import (
 	"os"
 
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/offchainlabs/nitro/blsSignatures"
 )
 
@@ -24,6 +25,7 @@ func DecodeBase64BLSPublicKey(pubKeyEncodedBytes []byte) (*blsSignatures.PublicK
 	if err != nil {
 		return nil, err
 	}
+	log.Debug("Decoded BLS public key", "bytes", hex.EncodeToString(pubKeyBytes))
 	pubKey, err := blsSignatures.PublicKeyFromBytes(pubKeyBytes, false)
 	if err != nil {
 		return nil, err

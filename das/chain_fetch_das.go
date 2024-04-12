@@ -86,6 +86,7 @@ func chainFetchGetByHash(
 
 	// try to fetch from the inner DAS
 	innerRes, err := daReader.GetByHash(ctx, hash)
+	// FIXME: this wont work for NEAR
 	if err == nil && dastree.ValidHash(hash, innerRes) {
 		return innerRes, nil
 	}

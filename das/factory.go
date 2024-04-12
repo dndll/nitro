@@ -183,39 +183,42 @@ func CreateBatchPosterDAS(
 	}
 
 	// Check config requirements
-	if !config.RPCAggregator.Enable || !config.RestAggregator.Enable {
-		return nil, nil, nil, errors.New("--node.data-availability.rpc-aggregator.enable and rest-aggregator.enable must be set when running a Batch Poster in AnyTrust mode")
-	}
 
 	if config.IpfsStorage.Enable {
 		return nil, nil, nil, errors.New("--node.data-availability.ipfs-storage.enable may not be set when running a Nitro AnyTrust node in Batch Poster mode")
 	}
-	// Done checking config requirements
 
-	var daWriter DataAvailabilityServiceWriter
-	daWriter, err := NewRPCAggregator(ctx, *config)
-	if err != nil {
-		return nil, nil, nil, err
+	if !config.NEARAggregator.Enable {
+		if !config.RPCAggregator.Enable || !config.RestAggregator.Enable {
+			return nil, nil, nil, errors.New("--node.data-availability.rpc-aggregator.enable and rest-aggregator.enable must be set when running a Batch Poster in AnyTrust mode")
+		}
+
+		return nil, nil, nil, errors.New("--node.data-availability.near-aggregator.enable must be set")
 	}
-	if dataSigner != nil {
-		// In some tests the batch poster does not sign Store requests
-		daWriter, err = NewStoreSigningDAS(daWriter, dataSigner)
+	// Done checking config requirements
+	var daWriter DataAvailabilityServiceWriter
+	var daReader DataAvailabilityServiceReader
+
+	var lifecycleManager LifecycleManager
+	if config.NEARAggregator.Enable {
+		log.Info("Initialising near service")
+		w, r, _, err := CreateNearDAS(ctx, config, &lifecycleManager)
 		if err != nil {
 			return nil, nil, nil, err
 		}
+		daWriter = w
+		daReader = r
 	}
 
-	restAgg, err := NewRestfulClientAggregator(ctx, &config.RestAggregator)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	restAgg.Start(ctx)
-	var lifecycleManager LifecycleManager
-	lifecycleManager.Register(restAgg)
-	var daReader DataAvailabilityServiceReader = restAgg
-	daReader, err = NewChainFetchReader(daReader, l1Reader, sequencerInboxAddr)
-	if err != nil {
-		return nil, nil, nil, err
+	// In some tests the batch poster does not sign Store requests
+	if dataSigner != nil {
+		// FIXME: comment the aggregator, since this is a POC
+		//nearAggr, err = NewStoreSigningDAS(nearAggr, dataSigner)
+		w, err := NewStoreSigningDAS(daWriter, dataSigner)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		daWriter = w
 	}
 
 	return daWriter, daReader, &lifecycleManager, nil
